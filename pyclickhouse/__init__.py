@@ -1,2 +1,2 @@
-from Connection import Connection
-from Cursor import Cursor
+from .Connection import Connection
+from .Cursor import Cursor
