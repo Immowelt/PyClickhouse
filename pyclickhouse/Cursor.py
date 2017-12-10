@@ -1,5 +1,5 @@
 import datetime as dt
-from formatter import TabSeparatedWithNamesAndTypesFormatter
+from .formatter import TabSeparatedWithNamesAndTypesFormatter
 
 class Cursor(object):
     """

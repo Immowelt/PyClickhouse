@@ -1,7 +1,7 @@
 import requests
 from requests.adapters import HTTPAdapter
-from Cursor import Cursor
-import urllib
+from .Cursor import Cursor
+import urllib.request, urllib.parse, urllib.error
 import multiprocessing
 import logging
 import traceback
@@ -66,10 +66,10 @@ class Connection(object):
                                     (
                                         self.host,
                                         str(self.port),
-                                        urllib.quote_plus(self.username),
-                                        urllib.quote_plus(self.password)
+                                        urllib.parse.quote_plus(self.username),
+                                        urllib.parse.quote_plus(self.password)
                                     )
-                if isinstance(query, unicode):
+                if isinstance(query, str):
                     query = query.encode('utf8')
                 r = Connection.Session.post(url, query)
             else:
@@ -77,11 +77,11 @@ class Connection(object):
                                     (
                                         self.host,
                                         str(self.port),
-                                        urllib.quote_plus(query),
-                                        urllib.quote_plus(self.username),
-                                        urllib.quote_plus(self.password)
+                                        urllib.parse.quote_plus(query),
+                                        urllib.parse.quote_plus(self.username),
+                                        urllib.parse.quote_plus(self.password)
                                     )
-                if isinstance(payload, unicode):
+                if isinstance(payload, str):
                     payload = payload.encode('utf8')
                 r = Connection.Session.post(url, payload)
             if not r.ok:

@@ -2,7 +2,7 @@ import datetime as dt
 
 class DictionaryAdapter(object):
     def getfields(self, dict):
-        return dict.keys()
+        return list(dict.keys())
 
     def getval(self, dict, field):
         if field in dict:
@@ -21,7 +21,7 @@ class TabSeparatedWithNamesAndTypesFormatter(object):
     def clickhousetypefrompython(self, pythonobj, name):
         if pythonobj is None:
             raise Exception('Cannot infer type of "%s" from None' % name)
-        if isinstance(pythonobj, unicode):
+        if isinstance(pythonobj, str):
             return 'String'
         if isinstance(pythonobj, str):
             return 'String'
@@ -166,12 +166,12 @@ if __name__ == '__main__':
     data = [DTO(), DTO(), DTO()]
 
     formatter = TabSeparatedWithNamesAndTypesFormatter()
-    print
+    print()
     f = formatter.format(data)
-    print f
+    print(f)
     v = formatter.unformat(f)
-    print v
+    print(v)
 
-    print data[0].escaping
-    print v[0]['escaping']
-    print data[0].escaping == v[0]['escaping']
+    print(data[0].escaping)
+    print(v[0]['escaping'])
+    print(data[0].escaping == v[0]['escaping'])
