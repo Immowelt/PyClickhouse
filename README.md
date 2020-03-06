@@ -35,7 +35,13 @@ access to a running instance of Clickhouse, which may provided through docker.
 
 The tests are run with [tox](https://tox.readthedocs.io/en/latest/) via `make test`, with uses 
 pipenv to create virtual environments for each of the python versions being tested. Currently 
-Python 2.7 and 3.7 are configured (see [tox.ini](./tox.ini)).
+Python 2.7 and 3.7 are configured (see [tox.ini](./tox.ini)). 
+
+Tox should be available outside the project, as it creates it's own environments:
+
+````bash
+pip install --user tox
+````
 
 Convenience make targets are provided to manage a local Clickhouse instance via Docker. They
 assume that docker is installed and the current user can use it without sudo (or use sudo to
