@@ -30,20 +30,22 @@ This will recreate the virtual environment as well, if necessary.
 
 ### Makefile and running tests
 
-The [Makefile](Makefile) target `test` is provided to run the project's tests. These require
-access to a running instance of Clickhouse, which is provided through docker. This assumes
-that docker is installed and the current user can use it without sudo.
+The [Makefile](Makefile) target `test` is provided to run the project's tests. Some require
+access to a running instance of Clickhouse, which may provided through docker. 
 
-A one-liner to run the tests in the virtual environment would be:
+The tests are run with [tox](https://tox.readthedocs.io/en/latest/) via `make test`, with uses 
+pipenv to create virtual environments for each of the python versions being tested. Currently 
+Python 2.7 and 3.7 are configured (see [tox.ini](./tox.ini)).
 
-````bash
-    pipenv run make test
-````
-
-Additional targets:
+Convenience make targets are provided to manage a local Clickhouse instance via Docker. They
+assume that docker is installed and the current user can use it without sudo (or use sudo to
+run these targets). The Clickhouse Server will be available on `localhost:8123`.
 
 - `run`: starts the clickhouse container
 - `stop`: stops the clickhouse container
+
+Additional targets:
+
 - `build`: runs the `build.sh` script
-- `to_2`: removes Pipfile.lock and configures the environment to use python 2
-- `to_3`: removes Pipfile.lock and configures the environment to use python 3
+- `to_2`: reconfigures the environment to use python 2
+- `to_3`: reconfigures the environment to use python 3

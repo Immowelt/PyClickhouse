@@ -1,5 +1,12 @@
 from __future__ import print_function, absolute_import
-import ujson
+from future.utils import iteritems
+from past.builtins import basestring, long
+try:
+    # ujson is currently not installable under python 2.7 and version 2.0 wasn't
+    # released yet - work around it with standard json
+    import ujson as json
+except:
+    import json
 
 import sys
 import datetime as dt
@@ -11,7 +18,7 @@ class NestingLevelTooHigh(Exception):
 class DictionaryAdapter(object):
     def getfields(self, doc, prefix='', had_array=False):
         result = []
-        for k, v in doc.iteritems():
+        for k, v in iteritems(doc):
             if isinstance(v, dict):
                 result.extend(self.getfields(v, prefix + k + '.', had_array))
             elif hasattr(v, '__iter__'):
@@ -42,7 +49,7 @@ class DictionaryAdapter(object):
             return val
         part = parts[0]
         if len(parts) == 1 and part == 'json':
-            return ujson.dumps(val)
+            return json.dumps(val)
         if isinstance(val, dict):
             if part not in val:
                 return None

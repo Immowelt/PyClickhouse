@@ -6,6 +6,8 @@ verify_ssl = true
 [dev-packages]
 autopep8="*"
 pylint = "*"
+tox = "*"
+tox-pipenv = "*"
 
 [packages]
 requests="*"

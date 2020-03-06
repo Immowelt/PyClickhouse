@@ -1,6 +1,6 @@
 test: run
 	# run tests and stop container, so it gets removed
-	python -m unittest discover ; docker stop clickhouse-test-server
+	tox --recreate
 
 run:
 	# start local temporary clickhouse server: https://github.com/yandex/ClickHouse/tree/master/docker/server
@@ -20,11 +20,5 @@ to_2:
 	rm -f Pipfile.lock
 	pipenv install --dev --python 2.7
 
-test_2: to_2
-	pipenv run python -m unittest discover -s test
 
-test_3: to_3
-	pipenv run python -m unittest
-
-
-.PHONY: test run stop build test_2 test_3 to_2 to_3
+.PHONY: test run stop build
