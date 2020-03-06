@@ -5,20 +5,18 @@ Minimalist Clickhouse Python driver with an API roughly resembling Python DB API
 
 ### Pipfile
 
-The [Pipfile](Pipfile) in this project omits the python version (section `[requires]`), to make
-this project compatible with Python 2 and 3. Currently the only library affected by
-this ambiguousness is `pylint`, because
-[from version 2.0 pylint requires Python 3](http://pylint.pycqa.org/en/latest/whatsnew/2.0.html).
+The [Pipfile](Pipfile) in this project omits the python version (section `[requires]`), to keep
+this project compatible with Python 2 and 3. 
 
 To develop or run anything in this project, it is recommended to setup a virtual
 environment using the provided Pipfile:
 
 ````bash
-    pipenv install
+    pipenv install --dev
 ````
 
 As it is, this command will create a virtual environment with the current `python`
-interpreter available in the system. The version of the python interpreter may be
+interpreter used in the system. The version of the python interpreter may be
 changed with the `--python` switch when installing:
 
 ````bash
