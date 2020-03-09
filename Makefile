@@ -1,6 +1,6 @@
 test: run
-	# run tests and stop container, so it gets removed
-	tox --recreate || ${MAKE} stop
+	# start container, run tests with tox and stop container, so it gets removed
+	tox || ${MAKE} stop
 	
 run:
 	# start local temporary clickhouse server: https://github.com/yandex/ClickHouse/tree/master/docker/server
