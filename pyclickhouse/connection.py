@@ -1,10 +1,10 @@
 from builtins import str
+
 # https://python-future.org/compatible_idioms.html#urllib-module
 from future.standard_library import install_aliases
+
 install_aliases()
 
-import urllib.request, urllib.parse, urllib.error
-import multiprocessing
 import logging
 import traceback
 import base64
@@ -80,8 +80,11 @@ class Connection(object):
         Private method, use Cursor to make calls to Clickhouse.
         """
         try:
-            credentials = self.username + ':' + self.password
-            header = {'Authorization': 'Basic %s' % (base64.b64encode(credentials.encode('ISO-8859-1')),)}
+            header = {}
+            if self.username and self.password:
+                credentials = self.username + ':' + self.password
+                header = {'Authorization': 'Basic %s' % (
+                    base64.b64encode(credentials.encode('ISO-8859-1')).decode('ISO-8859-1'),)}
 
             if query is None:
                 return Connection.Session.get('http://%s:%s' % (self.host, self.port), timeout=self.timeout, headers=header)

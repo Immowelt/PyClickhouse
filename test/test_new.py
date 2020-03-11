@@ -1,5 +1,8 @@
 # coding=utf-8
 import unittest
+import json
+import datetime
+
 import pyclickhouse
 import datetime as dt
 from pyclickhouse.formatter import TabSeparatedWithNamesAndTypesFormatter
@@ -28,7 +31,10 @@ class TestNewUnitTests(unittest.TestCase):
         self.cursor.store_documents('docs', [doc])
         self.cursor.select('select * from docs')
         r = self.cursor.fetchone()
-        assert str(r) == "{'Images.file': ['a', 'b'], 'Images.size': [400, 500], 'Offer.count': 1, 'Offer.price': 5, 'id': 3, 'historydate': datetime.date(2019, 6, 7)}"
+        self.assertEqual(r, {'Images.file': ['a', 'b'],
+                             'Images.size': [400, 500],
+                             'Offer.count': 1, 'Offer.price': 5,
+                             'id': 3, 'historydate': datetime.date(2019, 6, 7)})
 
     def test_store_doc2(self):
         doc = {'id': 3, 'Offer': {'price': 5, 'count': 1}, 'Images': [{'file': 'a', 'size': 400, 'tags': ['cool','Nikon']}, {'file': 'b', 'size': 500}]}

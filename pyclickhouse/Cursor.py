@@ -1,4 +1,7 @@
 from __future__ import absolute_import, print_function
+from future.utils import iteritems
+from builtins import filter
+from past.builtins import basestring
 
 import datetime as dt
 import logging
@@ -185,7 +188,7 @@ class Cursor(object):
     def _remove_nones(dict_or_array):
         if isinstance(dict_or_array, dict):
             result = {}
-            for k, v in dict_or_array.iteritems():
+            for k, v in iteritems(dict_or_array):
                 if v is not None:
                     a, b = Cursor._remove_nones(v)
                     if a:
@@ -194,7 +197,7 @@ class Cursor(object):
                     else:
                         result[k] = v
             return True, result
-        elif hasattr(dict_or_array, '__iter__'):
+        elif hasattr(dict_or_array, '__iter__') and not isinstance(dict_or_array, basestring):
             result = []
             for v in dict_or_array:
                 if v is not None:
@@ -255,7 +258,7 @@ class Cursor(object):
                 elif doc_field in adds and adds[doc_field] != doc_type:
                     adds[doc_field] = self.generalize_type(table_schema[doc_field], doc_type)
 
-        for field, type in adds.iteritems():
+        for field, type in iteritems(adds):
             logging.info('Extending %s with %s %s' % (table, field, type))
             self.ddl('alter table %s add column %s %s' % (table, field, type))
             table_fields.append(field)
@@ -263,7 +266,7 @@ class Cursor(object):
 
         table_schema = dict(zip(table_fields, table_types))
 
-        for field, type in modifies.iteritems():
+        for field, type in iteritems(modifies):
             if type != table_schema[field]:
                 logging.info('Modifying %s with %s %s' % (table, field, type))
                 self.ddl('alter table %s modify column %s %s' % (table, field, type))
