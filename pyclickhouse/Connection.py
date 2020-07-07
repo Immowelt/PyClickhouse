@@ -27,7 +27,7 @@ class Connection(object):
     Pool_connections=1
     Pool_maxsize=10
 
-    def __init__(self, host, port=None, username='default', password='', pool_connections=1, pool_maxsize=10, timeout=5, clickhouse_settings=''):
+    def __init__(self, host, port=None, username='default', password='', pool_connections=1, pool_maxsize=10, timeout=5, clickhouse_settings='', auth_method=None):
         """
         Create a new Connection object. Because HTTP protocol is used underneath, no real Connection is
         created. The Connection is rather an temporary object to create cursors.
@@ -44,6 +44,7 @@ class Connection(object):
         :param password: optional password to connect. The default value is empty string.
         :param pool_connections: optional number of TCP connections to pre-create when the Connection object is created.
         :param pool_maxsize: optional maximum number of TCP-connections this Connection object may make to the Clickhouse host.
+        :param auth_method: 'legacy' for the Authorization header, 'x' for the X-ClickHouse-User
         :return: the Connection object
         """
         tmp = host.split(':')
@@ -58,6 +59,9 @@ class Connection(object):
         self.password = password
         self.state = 'closed'
         self.timeout = timeout
+        if auth_method is None and (username != 'default' or password != ''):
+            auth_method = 'legacy'
+        self.auth_method = auth_method
         self.clickhouse_settings_encoded = ''
         if len(clickhouse_settings) > 0:
             self.clickhouse_settings_encoded = '&' + '&'.join(['%s=%s' % pair for pair in list(clickhouse_settings.items())])
@@ -81,7 +85,12 @@ class Connection(object):
         """
         try:
             credentials = self.username + ':' + self.password
-            header = {'Authorization': 'Basic %s' % (base64.b64encode(credentials.encode('ISO-8859-1')),)}
+            if self.auth_method == 'legacy':
+                header = {'Authorization': 'Basic %s' % (base64.b64encode(credentials.encode('ISO-8859-1')),)}
+            elif self.auth_method == 'x':
+                header = {'X-ClickHouse-User': self.username, 'X-ClickHouse-Key': self.password}
+            else:
+                header = {}
 
             if query is None:
                 return Connection.Session.get('http://%s:%s' % (self.host, self.port), timeout=self.timeout, headers=header)
@@ -108,7 +117,7 @@ class Connection(object):
                 payload = query.encode('utf-8') + '\n'.encode() + payload  # on python 3, all parts must be encoded (no implicit conversion)
                 r = Connection.Session.post(url, payload, timeout=self.timeout, headers=header)
             if not r.ok:
-                raise Exception(r.content)
+                raise Exception('Query %s raised error %s' % (query, r.content))
             return r
         except Exception as e:
             self.close()

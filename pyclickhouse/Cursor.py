@@ -205,7 +205,7 @@ class Cursor(object):
                             result[k] = [None] * len(arr)
                         result[k][i] = v
                     mapping.update(m)
-                elif hasattr(element, '__iter__'):
+                elif hasattr(element, '__iter__') and not isinstance(element, str):
                     raise NestingLevelTooHigh()
                 else:
                     if prefix not in result:
@@ -233,7 +233,7 @@ class Cursor(object):
                 r, m = Cursor._flatten_dict(v, prefix + k, path + [(k, 'dict')])
                 result.update(r)
                 mapping.update(m)
-            elif hasattr(v, '__iter__'):
+            elif hasattr(v, '__iter__') and not isinstance(v, str):
                 if allow_arrays:
                     r, m = Cursor._flatten_array(v, prefix + k, path + [(k, 'array')])
                     result.update(r)
@@ -284,30 +284,11 @@ class Cursor(object):
 
         raise Exception('Cannot ensure target schema in %s, %s' % (table, e.message))
 
-    def store_documents(self, table, documents):
+    def store_documents(self, table, documents, nullablelambda=lambda fieldname: False):
         """Store dictionaries or objects into table, extending the table schema if needed. If the type of some value in
         the documents contradicts with the existing column type in clickhouse, it will be converted to String to
         accomodate all possible values"""
-        flattened = []
-        commentmap = {}
-        for doc in documents:
-            f, m = Cursor._flatten_dict(doc)
-            commentmap.update(m)
-            flattened.append(f)
-
-        doc_schema = {}
-        for doc in flattened:
-            doc_fields, doc_types = self.formatter.get_schema(doc)
-            for f, t in zip(doc_fields, doc_types):
-                if f not in doc_schema:
-                    doc_schema[f] = t
-                elif doc_schema[f] != t:
-                    doc_schema[f] = self.formatter.generalize_type(doc_schema[f], t)
-
-        fields = doc_schema.keys()
-        types = [doc_schema[f] for f in fields]
-
-        fields, types = self._ensure_schema(table, fields, types, commentmap)
+        fields, flattened, types = self.prepare_document_table(table, documents, nullablelambda)
         tries = 0
         while tries < 5:
             try:
@@ -318,8 +299,89 @@ class Cursor(object):
                     tries += 1
                 else:
                     raise
-        raise e
 
+        def store_only_changed_documents(self, table, documents, primary_keys, datetimefield, ignore_fields=None,
+                                         where='1=1', nullablelambda=lambda fieldname: False):
+            """
+            Compares "documents" in the "table" with the latest data retrieved from the table, using grouping by the
+            "primary_keys" (list of field names) and getting argMax values sorted by "datetimefield". Compares the existing data with the data passed
+            in "documents" ignoring the "datetimefield" as well as "ignore_fields", and inserts a new record only if some
+            fields have changed. Returns the number of really inserted rows.
+
+            Use this method only for really small tables.
+            """
+
+            table_fields, documents, table_types = self.prepare_document_table(table, documents, nullablelambda)
+
+
+            if ignore_fields is None:
+                ignore_fields = list()
+
+            ignore_fields.append(datetimefield)
+            ignore_fields.extend(primary_keys)
+
+            self.select("""
+            select %s, %s
+            from %s
+            where %s
+            group by %s
+            """ % (
+                    ','.join(primary_keys),
+                    ','.join(
+            ['argMax(%s,%s) as %s' % (x, datetimefield, x) for x in table_fields if x not in ignore_fields]),
+                    table,
+                    where,
+                    ','.join(primary_keys)
+            ))
+
+            existing = dict()
+            for row in self.fetchall():
+                pk = tuple([row[x] for x in primary_keys])
+                existing[pk] = row
+
+            changed_documents = list()
+            for doc in documents:
+                pk = tuple([doc[x] for x in primary_keys])
+
+                if pk not in existing:
+                    changed_documents.append(doc)
+                    continue
+
+            row = existing[pk]
+            for field in table_fields:
+                if field in ignore_fields:
+                    continue
+                if field not in doc:
+                    continue
+                if field not in row or row[field] != doc[field]:
+                    changed_documents.append(doc)
+                    break
+
+
+            if len(changed_documents) > 0:
+                self.bulkinsert(table, changed_documents, table_fields, table_types)
+
+            return len(changed_documents)
+
+    def prepare_document_table(self, table, documents, nullablelambda=lambda fieldname: False):
+        flattened = []
+        commentmap = {}
+        for doc in documents:
+            f, m = Cursor._flatten_dict(doc)
+            commentmap.update(m)
+            flattened.append(f)
+        doc_schema = {}
+        for doc in flattened:
+            doc_fields, doc_types = self.formatter.get_schema(doc, nullablelambda)
+            for f, t in zip(doc_fields, doc_types):
+                if f not in doc_schema:
+                    doc_schema[f] = t
+                elif doc_schema[f] != t:
+                    doc_schema[f] = self.formatter.generalize_type(doc_schema[f], t)
+        fields = doc_schema.keys()
+        types = [doc_schema[f] for f in fields]
+        fields, types = self._ensure_schema(table, fields, types, commentmap)
+        return fields, flattened, types
 
     @staticmethod
     def _set_on_path(target, path, val):

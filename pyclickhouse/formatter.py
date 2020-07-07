@@ -26,7 +26,7 @@ class MultilevelDictionaryAdapter(object):
         for k, v in doc.items():
             if isinstance(v, dict):
                 result.extend(self.getfields(v, prefix + k + '_', had_array))
-            elif hasattr(v, '__iter__'):
+            elif hasattr(v, '__iter__') and not isinstance(v, str):
                 if had_array:
                     raise NestingLevelTooHigh()
                 dict_keys = set()
@@ -73,12 +73,19 @@ class ObjectAdapter(object):
 class TabSeparatedWithNamesAndTypesFormatter(object):
     def generalize_type(self, existing_type, new_type):
         arr = 'Array('
+        nu = 'Nullable('
         if existing_type == new_type:
             return existing_type
         elif existing_type.startswith(arr) and new_type.startswith(arr):
             return 'Array(%s)' % self.generalize_type(existing_type[len(arr):-1], new_type[len(arr):-1])
         elif existing_type.startswith(arr) or new_type.startswith(arr):
             return 'String'
+        elif existing_type.startswith(nu) or new_type.startswith(nu):
+            if existing_type.startswith(nu):
+                existing_type = existing_type[len(nu):-1]
+            if new_type.startswith(nu):
+                new_type = new_type[len(nu):-1]
+            return 'Nullable(%s)' % self.generalize_type(existing_type, new_type)
         elif existing_type.startswith('Int') and new_type.startswith('Float'):
             return new_type
         elif existing_type.startswith('Float') and new_type.startswith('Int'):
@@ -98,51 +105,62 @@ class TabSeparatedWithNamesAndTypesFormatter(object):
         return 'String'
 
 
-    def clickhousetypefrompython(self, pythonobj, name):
+    def clickhousetypefrompython(self, pythonobj, name, nullablelambda=lambda fieldname: False):
         if pythonobj is None:
             raise Exception('Cannot infer type of "%s" from None' % name)
-        if isinstance(pythonobj, basestring):  # 2to3 converts this to str on python 3 during installation, no extra imports necessary
-            return 'String'
-        if isinstance(pythonobj, str):
-            return 'String'
-        if isinstance(pythonobj, bool):
-            return 'UInt8'
-        if isinstance(pythonobj, int) or isinstance(pythonobj, long):
-            return 'Int64'
-        if isinstance(pythonobj, float) or isinstance(pythonobj, Decimal):
-            return 'Float64'
-        if isinstance(pythonobj, dt.datetime):
-            return 'DateTime'
-        if isinstance(pythonobj, dt.date):
-            return 'Date'
-        if isinstance(pythonobj, dict):
-            return 'String' # Actually JSON
-        if hasattr(pythonobj, '__iter__'):
+        result = None
+        try:
+            isstring = isinstance(pythonobj, basestring)
+            islong = isinstance(pythonobj, long)
+        except:
+            isstring = isinstance(pythonobj, str)
+            islong = isinstance(pythonobj, int)
+        if isstring:
+            result = 'String'
+        elif isinstance(pythonobj, str):
+            result = 'String'
+        elif isinstance(pythonobj, bool):
+            result = 'UInt8'
+        elif isinstance(pythonobj, int) or islong:
+            result = 'Int64'
+        elif isinstance(pythonobj, float) or isinstance(pythonobj, Decimal):
+            result = 'Float64'
+        elif isinstance(pythonobj, dt.datetime):
+            result = 'DateTime'
+        elif isinstance(pythonobj, dt.date):
+            result = 'Date'
+        elif isinstance(pythonobj, dict):
+            result = 'String' # Actually JSON
+        elif hasattr(pythonobj, '__iter__') and not isinstance(pythonobj, str):
             possibletypes = set()
             for x in pythonobj:
                 if x is not None:
-                    possibletypes.add(self.clickhousetypefrompython(x, name))
+                    possibletypes.add(self.clickhousetypefrompython(x, name, nullablelambda))
             if len(possibletypes) == 1:
-                return 'Array(' + list(possibletypes)[0]  + ')'
+                result = 'Array(' + list(possibletypes)[0]  + ')'
             elif len(possibletypes) == 0:
                 raise Exception('Cannot infer type of "%s" from empty array' % name)
-            elif len(possibletypes) == 2:
-                possibletypes = list(possibletypes)
-                newtype = self.generalize_type(possibletypes[0], possibletypes[1])
-                return 'Array(%s)' % newtype
             else:
-                raise Exception('Array in "%s" contains values of contradicting types %s' % (name, ', '.join(possibletypes)))
-        raise Exception('Cannot infer type of "%s", type not supported for: %s, %s' % (name, repr(pythonobj), type(pythonobj)))
+                possibletypes = list(possibletypes)
+                type = possibletypes[0]
+                for other in possibletypes[1:]:
+                    type = self.generalize_type(type, other)
+                result = 'Array(' + type  + ')'
+        if result is None:
+            raise Exception('Cannot infer type of "%s", type not supported for: %s, %s' % (name, repr(pythonobj), type(pythonobj)))
+        if nullablelambda(name):
+            result = 'Nullable(%s)' % result
+        return result
 
 
-    def get_schema(self, doc):
+    def get_schema(self, doc, nullablelambda=lambda fieldname: False):
         if isinstance(doc, dict):
             adapter = DictionaryAdapter()
         else:
             adapter = ObjectAdapter()
 
         fields = adapter.getfields(doc)
-        types = [self.clickhousetypefrompython(adapter.getval(doc, f), f) for f in fields]
+        types = [self.clickhousetypefrompython(adapter.getval(doc, f), f, nullablelambda) for f in fields]
 
         return fields, types
 
@@ -153,81 +171,93 @@ class TabSeparatedWithNamesAndTypesFormatter(object):
         if fields is None and types is None:
             fields, types = self.get_schema(rows[0])
 
+        if sys.version_info[0] == 2:
+            fields = [x.encode('utf8') for x in fields]
+
         if isinstance(rows[0], dict):
             adapter = DictionaryAdapter()
         else:
             adapter = ObjectAdapter()
 
         return fields, types, '%s\n%s\n%s' % (
-            '\t'.join([x.encode('utf8') for x in fields]),
+            '\t'.join(fields),
             '\t'.join(types),
-            '\n'.join(['\t'.join([self.formatfield(adapter.getval(r, f), t) for f, t in zip(fields, types)]) for r in rows])
+            '\n'.join(['\t'.join([self.formatfield(adapter.getval(r, f), t, f) for f, t in zip(fields, types)]) for r in rows])
         )
 
-    def formatfield(self, value, type, inarray = False):
-        if type.startswith('LowCardinality(') and type.endswith(')'):
-            type = type[len('LowCardinality('):-1]
+    def formatfield(self, value, type, name, inarray = False):
+        try:
+            if type.startswith('LowCardinality(') and type.endswith(')'):
+                type = type[len('LowCardinality('):-1]
 
-        if type.startswith('Nullable(') and type.endswith(')'):
-            type = type[len('Nullable('):-1]
+            if type.startswith('Nullable(') and type.endswith(')'):
+                type = type[len('Nullable('):-1]
+                if value is None:
+                    return '\\N'
 
-        if type in ['UInt8','UInt16', 'UInt32', 'UInt64','Int8','Int16','Int32','Int64']:
-            if value is None:
-                return '0'
-            if isinstance(value, bool):
-                return '1' if value else '0'
-            return str(value)
-        if type in ['String', 'IPv6']:
-            # Because String is also a type for columns having values of various type depending on row, the value
-            # parameter might be just anything and has to be converted first
-            if not isinstance(value, basestring):
-                if isinstance(value, int) or isinstance(value, float) or isinstance(value, bool):
-                    value = str(value)
-                elif isinstance(value, dt.date):
-                    value = value.strftime('%Y-%m-%d')
-                elif isinstance(value, dt.datetime):
-                    value = value.strftime('%Y-%m-%d %H:%M:%S')
+            if type in ['UInt8','UInt16', 'UInt32', 'UInt64','Int8','Int16','Int32','Int64']:
+                if value is None:
+                    return '0'
+                if isinstance(value, bool):
+                    return '1' if value else '0'
+                return str(value)
+            if type in ['String', 'IPv6']:
+                if value is None:
+                    escaped = ''
                 else:
-                    value = ujson.dumps(value)
+                    # Because String is also a type for columns having values of various type depending on row, the value
+                    # parameter might be just anything and has to be converted first
+                    if sys.version_info[0] == 2 and isinstance(value, unicode):
+                        value = value.encode('utf8')
+                    elif sys.version_info[0] == 3 and isinstance(value, bytes):
+                        value = value.decode('utf8')
+                    if not isinstance(value, str):
+                        if isinstance(value, int) or isinstance(value, float) or isinstance(value, bool):
+                            value = str(value)
+                        elif isinstance(value, dt.date):
+                            value = value.strftime('%Y-%m-%d')
+                        elif isinstance(value, dt.datetime):
+                            value = value.strftime('%Y-%m-%d %H:%M:%S')
+                        else:
+                            value = ujson.dumps(value)
+                    escaped =  value.replace('\\','\\\\').replace('\n','\\n').replace('\t','\\t')
+                if inarray:
+                    return "'%s'" % escaped.replace("'", "\\'")
+                else:
+                    return  escaped
+            if type in ['Float32', 'Float64']:
+                if value is None:
+                    return '0.0'
+                return str(value).replace(',','.') # replacing comma to dot to ensure US format
+            if type == 'Date':
+                if value is None or value <= dt.date(1970,1,2):
+                    escaped = '0000-00-00'
+                else:
+                    escaped = '%04d-%02d-%02d' % (value.year, value.month, value.day)
+                if inarray:
+                    return "'%s'" % escaped
+                else:
+                    return escaped
+            if type == 'DateTime':
+                if value is None or value <= dt.datetime(1970,1,2,0,0,0):
+                    escaped = '0000-00-00 00:00:00'
+                else:
+                    escaped = '%04d-%02d-%02d %02d:%02d:%02d' % (value.year, value.month, value.day, value.hour, value.minute, value.second)
+                if inarray:
+                    return "'%s'" % escaped
+                else:
+                    return escaped
+            if 'Array' in type:
+                if value is None:
+                    return '[]'
+                return '[%s]' % ','.join([self.formatfield(x, type[6:-1], name, True) for x in value])
+        except Exception as e:
+            if sys.version_info[0] == 3:
+                raise Exception('Cannot format field %s' % name) from e
+            else:
+                raise Exception('Cannot format field %s, %s' % (name, e))
 
-            if sys.version_info[0] == 2 and isinstance(value, unicode):
-                value = value.encode('utf8')
-
-            if value is None:
-                escaped = ''
-            else:
-                escaped =  value.replace('\\','\\\\').replace('\n','\\n').replace('\t','\\t')
-            if inarray:
-                return "'%s'" % escaped.replace("'", "\\'")
-            else:
-                return  escaped
-        if type in ['Float32', 'Float64']:
-            if value is None:
-                return '0.0'
-            return str(value).replace(',','.') # replacing comma to dot to ensure US format
-        if type == 'Date':
-            if value is None or value <= dt.date(1970,1,2):
-                escaped = '0000-00-00'
-            else:
-                escaped = '%04d-%02d-%02d' % (value.year, value.month, value.day)
-            if inarray:
-                return "'%s'" % escaped
-            else:
-                return escaped
-        if type == 'DateTime':
-            if value is None or value <= dt.datetime(1970,1,2,0,0,0):
-                escaped = '0000-00-00 00:00:00'
-            else:
-                escaped = '%04d-%02d-%02d %02d:%02d:%02d' % (value.year, value.month, value.day, value.hour, value.minute, value.second)
-            if inarray:
-                return "'%s'" % escaped
-            else:
-                return escaped
-        if 'Array' in type:
-            if value is None:
-                return '[]'
-            return '[%s]' % ','.join([self.formatfield(x, type[6:-1], True) for x in value])
-        raise Exception('Unexpected error, field cannot be formatted, %s, %s' % (str(value), type))
+        raise Exception('Unexpected error, field %s cannot be formatted, %s, %s' % (name, str(value), type))
 
 
     def unformatfield(self, value, type):
@@ -236,10 +266,12 @@ class TabSeparatedWithNamesAndTypesFormatter(object):
 
         if type.startswith('Nullable(') and type.endswith(')'):
             type = type[len('Nullable('):-1]
+            if value == '\\N':
+                return None
 
         if type in ['UInt8','UInt16', 'UInt32', 'UInt64','Int8','Int16','Int32','Int64']:
             return int(value)
-        if type in ['String', 'IPv6']:
+        if type in ['String', 'IPv6', 'UUID']:
             return value.replace('\\n','\n').replace('\\t','\t').replace('\\\\','\\')
         if type in ['Float32', 'Float64']:
             return float(value)

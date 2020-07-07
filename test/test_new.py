@@ -82,7 +82,10 @@ class TestNewUnitTests(unittest.TestCase):
 
         doc = {'id': 3, 'sub': [{'dict': 'in_array', 'needs': ['json', 'too_much_nesting']}]}
         bulk, map = pyclickhouse.Cursor._flatten_dict(doc)
-        assert bulk == {'id': 3, 'sub_json': '[{"needs":["json","too_much_nesting"],"dict":"in_array"}]'}
+        assert bulk['id'] == 3
+        sub = json.loads(bulk['sub_json'])[0]
+        assert sub['dict'] == 'in_array'
+        assert sub['needs'] == ['json','too_much_nesting']
         assert map == {'id':'id=scalar', 'sub_json': 'sub=json'}
 
 
@@ -206,3 +209,10 @@ class TestNewUnitTests(unittest.TestCase):
 
         result = self.cursor.formatter.clickhousetypefrompython([1, False], 'test')
         assert result == 'Array(String)'
+
+
+    def test_nullable(self):
+        result = self.cursor.formatter.generalize_type('Int64', 'Nullable(Int64)')
+        assert result == 'Nullable(Int64)'
+        result = self.cursor.formatter.generalize_type('Float64', 'Nullable(Int64)')
+        assert result == 'Nullable(Float64)'
