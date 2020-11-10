@@ -246,8 +246,10 @@ class Cursor(object):
 
         return result, mapping
 
-    def _ensure_schema(self, table, fields, types, commentmap=None):
+    def _ensure_schema(self, table, fields, types, commentmap=None, usebuffertable=None):
         tries = 0
+        message = ''
+        dropped=False
         while tries < 5:
             try:
                 table_fields, table_types = self.get_schema(table)
@@ -257,6 +259,9 @@ class Cursor(object):
                 for doc_field, doc_type in zip(fields, types):
                     if doc_field not in table_schema:
                         logging.info('Extending %s with %s %s' % (table, doc_field, doc_type))
+                        if usebuffertable is not None and not dropped:
+                            self.ddl('drop table if exists %s_Buffer' % table)
+                            dropped = True
                         self.ddl('alter table %s add column %s %s' % (table, doc_field, doc_type))
                         if commentmap and doc_field in commentmap:
                             self.ddl("alter table %s comment column %s '%s'" % (table, doc_field, commentmap[doc_field]))
@@ -266,6 +271,10 @@ class Cursor(object):
                         new_type = self.formatter.generalize_type(table_schema[doc_field], doc_type)
                         if new_type != table_schema[doc_field]:
                             logging.info('Modifying %s with %s %s' % (table, doc_field, new_type))
+                            if usebuffertable is not None and not dropped:
+                                # dropping will force flush the buffer
+                                self.ddl('drop table if exists %s_Buffer' % table)
+                                dropped = True
                             self.ddl('alter table %s modify column %s %s' % (table, doc_field, new_type))
                             if commentmap and doc_field in commentmap:
                                 self.ddl(
@@ -278,74 +287,82 @@ class Cursor(object):
                 if ddled:
                     self.ddl('optimize table %s' % table)
 
+                if usebuffertable is not None:
+                    self.ddl("""
+                    CREATE TABLE IF NOT EXISTS %s_Buffer AS %s 
+                    ENGINE = %s""" % (table, table, usebuffertable))
+
                 return fields, new_types
             except Exception as e:
                 tries += 1
+                message = e.message if hasattr(e, 'message') else str(e)
 
-        raise Exception('Cannot ensure target schema in %s, %s' % (table, e.message))
+        raise Exception('Cannot ensure target schema in %s, %s' % (table, message))
 
-    def store_documents(self, table, documents, nullablelambda=lambda fieldname: False):
+    def store_documents(self, table, documents, nullablelambda=lambda fieldname: False, usebuffertable=None):
         """Store dictionaries or objects into table, extending the table schema if needed. If the type of some value in
         the documents contradicts with the existing column type in clickhouse, it will be converted to String to
-        accomodate all possible values"""
-        fields, flattened, types = self.prepare_document_table(table, documents, nullablelambda)
+        accomodate all possible values. If usebuffertable is passed (a string with the Buffer engine definition),
+        a new buffer table will be created if not exists, and used if possible. The buffer table will be dropped and
+        recreated, if new columns have to be added to the underlying table."""
+        fields, flattened, types = self.prepare_document_table(table, documents, nullablelambda, usebuffertable)
         tries = 0
         while tries < 5:
             try:
-                self.bulkinsert(table, flattened, fields, types)
+                self.bulkinsert(table if usebuffertable is None else table+'_Buffer', flattened, fields, types)
                 return
             except Exception as e:
-                if 'bad version' in e.message:  # can happen if we're inserting data while some other process is changing the table
+                if (hasattr(e, 'message') and 'bad version' in e.message) or 'bad version' in str(e):  # can happen if we're inserting data while some other process is changing the table
                     tries += 1
                 else:
                     raise
 
-        def store_only_changed_documents(self, table, documents, primary_keys, datetimefield, ignore_fields=None,
-                                         where='1=1', nullablelambda=lambda fieldname: False):
-            """
-            Compares "documents" in the "table" with the latest data retrieved from the table, using grouping by the
-            "primary_keys" (list of field names) and getting argMax values sorted by "datetimefield". Compares the existing data with the data passed
-            in "documents" ignoring the "datetimefield" as well as "ignore_fields", and inserts a new record only if some
-            fields have changed. Returns the number of really inserted rows.
+    def store_only_changed_documents(self, table, documents, primary_keys, datetimefield, ignore_fields=None,
+                                     where='1=1', nullablelambda=lambda fieldname: False, usebuffertable=None):
+        """
+        Compares "documents" in the "table" with the latest data retrieved from the table, using grouping by the
+        "primary_keys" (list of field names) and getting argMax values sorted by "datetimefield". Compares the existing data with the data passed
+        in "documents" ignoring the "datetimefield" as well as "ignore_fields", and inserts a new record only if some
+        fields have changed. Returns the number of really inserted rows.
 
-            Use this method only for really small tables.
-            """
+        Use this method only for really small tables.
+        """
 
-            table_fields, documents, table_types = self.prepare_document_table(table, documents, nullablelambda)
+        table_fields, documents, table_types = self.prepare_document_table(table, documents, nullablelambda, usebuffertable=usebuffertable)
 
 
-            if ignore_fields is None:
-                ignore_fields = list()
+        if ignore_fields is None:
+            ignore_fields = list()
 
-            ignore_fields.append(datetimefield)
-            ignore_fields.extend(primary_keys)
+        ignore_fields.append(datetimefield)
+        ignore_fields.extend(primary_keys)
 
-            self.select("""
-            select %s, %s
-            from %s
-            where %s
-            group by %s
-            """ % (
-                    ','.join(primary_keys),
-                    ','.join(
-            ['argMax(%s,%s) as %s' % (x, datetimefield, x) for x in table_fields if x not in ignore_fields]),
-                    table,
-                    where,
-                    ','.join(primary_keys)
-            ))
+        self.select("""
+        select %s, %s
+        from %s
+        where %s
+        group by %s
+        """ % (
+                ','.join(primary_keys),
+                ','.join(
+        ['argMax(%s,%s) as %s' % (x, datetimefield, x) for x in table_fields if x not in ignore_fields]),
+                table,
+                where,
+                ','.join(primary_keys)
+        ))
 
-            existing = dict()
-            for row in self.fetchall():
-                pk = tuple([row[x] for x in primary_keys])
-                existing[pk] = row
+        existing = dict()
+        for row in self.fetchall():
+            pk = tuple([row[x] for x in primary_keys])
+            existing[pk] = row
 
-            changed_documents = list()
-            for doc in documents:
-                pk = tuple([doc[x] for x in primary_keys])
+        changed_documents = list()
+        for doc in documents:
+            pk = tuple([doc[x] for x in primary_keys])
 
-                if pk not in existing:
-                    changed_documents.append(doc)
-                    continue
+            if pk not in existing:
+                changed_documents.append(doc)
+                continue
 
             row = existing[pk]
             for field in table_fields:
@@ -358,12 +375,12 @@ class Cursor(object):
                     break
 
 
-            if len(changed_documents) > 0:
-                self.bulkinsert(table, changed_documents, table_fields, table_types)
+        if len(changed_documents) > 0:
+            self.bulkinsert(table if usebuffertable is None else table+'_Buffer', changed_documents, table_fields, table_types)
 
-            return len(changed_documents)
+        return len(changed_documents)
 
-    def prepare_document_table(self, table, documents, nullablelambda=lambda fieldname: False):
+    def prepare_document_table(self, table, documents, nullablelambda=lambda fieldname: False, usebuffertable=None):
         flattened = []
         commentmap = {}
         for doc in documents:
@@ -380,7 +397,7 @@ class Cursor(object):
                     doc_schema[f] = self.formatter.generalize_type(doc_schema[f], t)
         fields = doc_schema.keys()
         types = [doc_schema[f] for f in fields]
-        fields, types = self._ensure_schema(table, fields, types, commentmap)
+        fields, types = self._ensure_schema(table, fields, types, commentmap, usebuffertable)
         return fields, flattened, types
 
     @staticmethod

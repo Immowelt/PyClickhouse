@@ -126,7 +126,7 @@ class Connection(object):
                     Connection.reopensession()
             except:
                 pass
-            logging.error(traceback.format_exc())
+            logging.exception('When executing query %s' % query)
             raise
 
     def open(self):

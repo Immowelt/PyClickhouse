@@ -148,7 +148,7 @@ class TabSeparatedWithNamesAndTypesFormatter(object):
                 result = 'Array(' + type  + ')'
         if result is None:
             raise Exception('Cannot infer type of "%s", type not supported for: %s, %s' % (name, repr(pythonobj), type(pythonobj)))
-        if nullablelambda(name):
+        if nullablelambda(name) and not result.startswith('Array'):
             result = 'Nullable(%s)' % result
         return result
 
@@ -272,7 +272,7 @@ class TabSeparatedWithNamesAndTypesFormatter(object):
         if type in ['UInt8','UInt16', 'UInt32', 'UInt64','Int8','Int16','Int32','Int64']:
             return int(value)
         if type in ['String', 'IPv6', 'UUID']:
-            return value.replace('\\n','\n').replace('\\t','\t').replace('\\\\','\\')
+            return value.replace('\\n','\n').replace('\\t','\t').replace("\\'", "'").replace('\\\\','\\')
         if type in ['Float32', 'Float64']:
             return float(value)
         if type == 'Date':
